@@ -17,21 +17,21 @@ inputs:
     description: 'The name of your Docker stack.'
     required: true
   ssh_deploy_private_key:
-    description: 'The private key you have authenticated to connect to your server via SSH.'
+    description: 'The private key you have authenticated to connect to your servers via SSH.'
     required: true
   ssh_remote_known_hosts:
-    description: 'The public key of your SSH server to validate we are connecting to the right server.'
+    description: 'The public key of your SSH servers to validate we are connecting to the right servers.'
     default: ''
     required: false
   ssh_deploy_user:
-    description: 'The user that you would like to connect as on the remote server via SSH.'
+    description: 'The user that you would like to connect as on the remote servers via SSH.'
     default: 'deploy'
     required: true
-  ssh_remote_hostname:
-    description: 'The hostname or IP address of the server you want to connect to.'
+  ssh_remote_hostnames:
+    description: 'The hostname or IP address of the servers you want to connect to.'
     required: true
   ssh_remote_port:
-    description: 'The SSH port of the remote server you would like to connect to.'
+    description: 'The SSH port of the remote servers you would like to connect to.'
     default: '22'
     required: false
   registry:
@@ -88,7 +88,7 @@ runs:
         echo "::group::Validating SSH Connections"
         
         # Split hostnames into an array
-        IFS=',' read -ra HOSTS <<< "${{ inputs.ssh_remote_hostname }}"
+        IFS=',' read -ra HOSTS <<< "${{ inputs.ssh_remote_hostnames }}"
         
         for host in "${HOSTS[@]}"; do
           # Trim whitespace
@@ -148,12 +148,12 @@ runs:
         fi
       shell: bash
 
-    - name: If no known_hosts file is provided, use ssh-keyscan to get the public key of the remote server.
+    - name: If no known_hosts file is provided, use ssh-keyscan to get the public key of the remote servers.
       if: ${{ inputs.ssh_remote_known_hosts == '' }}
       run: |
         echo "::warning::Consider setting \"SSH_REMOTE_KNOWN_HOSTS\" as a GitHub Actions secret for improved security.%0A%0A\
         For more information see the harrisonratcliffe/github-action-docker-swarm-deploy README."
-        ssh-keyscan -p ${{ inputs.ssh_remote_port }} -H ${{ inputs.ssh_remote_hostname }} >> ~/.ssh/known_hosts
+        ssh-keyscan -p ${{ inputs.ssh_remote_port }} -H ${{ inputs.ssh_remote_hostnames }} >> ~/.ssh/known_hosts
         chmod 644 ~/.ssh/known_hosts
         if [ ! -s ~/.ssh/known_hosts ]; then
           echo "::error::The known_hosts file is empty. This may indicate an issue with the SSH keyscan process."
@@ -267,11 +267,11 @@ runs:
           env | sort | sed 's/^/::debug::  /'
         fi
       shell: bash
-    
+
     - name: Run Docker Stack deployment via SSH
       run: |
         # Split hostnames into an array
-        IFS=',' read -ra HOSTS <<< "${{ inputs.ssh_remote_hostname }}"
+        IFS=',' read -ra HOSTS <<< "${{ inputs.ssh_remote_hostnames }}"
         
         for host in "${HOSTS[@]}"; do
           # Trim whitespace
