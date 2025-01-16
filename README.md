@@ -1,3 +1,5 @@
+**This is a fork of [serversideup/github-action-docker-swarm-deploy](https://github.com/serversideup/github-action-docker-swarm-deploy) to allow multiple managers in a Docker Swarm cluster.**
+
 <p align="center">
 		<img src=".github/img/readme-header.png" width="1280" alt="Header Image">
 </p>
@@ -20,6 +22,7 @@ This is a GitHub Action intended to simplify the deployment experience with GitH
 - 🧮 Store MD5 hashes in environment variables for deployment
 - 🔐 Use with private registries
 - 🏠 Use .env files for deployment
+- 🌐 Works in a cluster with multiple managers
 
 ## Usage
 Here is an example workflow:
