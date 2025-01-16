@@ -28,7 +28,7 @@ inputs:
     default: 'deploy'
     required: true
   ssh_remote_hostnames:
-    description: 'The hostname or IP address of the servers you want to connect to.'
+    description: 'The hostnames or IP addresses of the servers you want to connect to.'
     required: true
   ssh_remote_port:
     description: 'The SSH port of the remote servers you would like to connect to.'
