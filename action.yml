@@ -168,6 +168,8 @@ runs:
         else
           if [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
             echo "::notice::Debug: Contents of ~/.ssh/known_hosts:"
+       shell: bash
+            
 branding:
   icon: 'zap'
   color: 'blue'
