@@ -39,10 +39,10 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
-      - uses: serversideup/github-action-docker-swarm-deploy@v3
+      - uses: harrisonratcliffe/github-action-docker-swarm-deploy@v1.0.0
         with:
           ssh_deploy_private_key: "${{ secrets.SSH_DEPLOY_PRIVATE_KEY }}"
-          ssh_remote_hostname: "${{ secrets.SSH_REMOTE_HOSTNAME }}"
+          ssh_remote_hostnames: "${{ secrets.SSH_REMOTE_HOSTNAMES }}"
           registry: "ghcr.io"
           registry-username: "${{ github.actor }}"
           registry-token: "${{ secrets.GITHUB_TOKEN }}"
@@ -65,27 +65,27 @@ The following inputs are available:
 | registry                | Comma-separated list of container registries to authenticate with (e.g., "docker.io,ghcr.io").   | `docker.io`                                          | false    |
 | registry-token          | The token or password to use to authenticate with the container registry.                        |                                                      | ⚠️ true  |
 | registry-username       | The username to use to authenticate with the container registry.                                 |                                                      | ⚠️ true  |
-| ssh_deploy_private_key  | The private key you have authenticated to connect to your server via SSH.                        |                                                      | ⚠️ true  |
-| ssh_deploy_user         | The user that you would like to connect as on the remote server via SSH.                         | `deploy`                                             | ⚠️ true  |
-| ssh_remote_hostname     | The hostname or IP address of the server you want to connect to.                                 |                                                      | ⚠️ true  |
-| ssh_remote_known_hosts  | The public key of your SSH server to validate we are connecting to the right server.             |                                                      | false    |
-| ssh_remote_port         | The SSH port of the remote server you would like to connect to.                                  | `22`                                                 | false    |
+| ssh_deploy_private_key  | The private key you have authenticated to connect to your servers via SSH.                        |                                                      | ⚠️ true  |
+| ssh_deploy_user         | The user that you would like to connect as on the remote servers via SSH.                         | `deploy`                                             | ⚠️ true  |
+| ssh_remote_hostnames     | The hostnames or IP addresses (commas separated) of the servers you want to connect to.         |                                                      | ⚠️ true  |
+| ssh_remote_known_hosts  | The public key of your SSH servers to validate we are connecting to the right server.             |                                                      | false    |
+| ssh_remote_port         | The SSH port of the remote servers you would like to connect to.                                  | `22`                                                 | false    |
 | stack_name              | The name of your Docker stack.                                                                   |                                                      | ⚠️ true  |
 
 ## Working with SSH
 SSH can have a few moving parts and it's important you get this right. Here's a few pointers to ensure you have the right setup.
 
 ### ssh_deploy_user
-This is the user you want to connect to your server with. This is most likely going to be `deploy` but could be different depending on your setup. It is very important that whatever user you choose, this user should have permissions to run `docker stack deploy` (without `sudo`).
+This is the user you want to connect to your servers with. This is most likely going to be `deploy` but could be different depending on your setup. It is very important that whatever user you choose, this user should have permissions to run `docker stack deploy` (without `sudo`).
 
 ### ssh_remote_hostname
-This is the hostname or IP address of your server. This is most likely going to be your server's public IP address. This can be `1.2.3.4` or `myserver.example.com`.
+This is the hostnames or IP addresses of your servers. This is most likely going to be your server's public IP address. This can be `1.2.3.4` or `myserver.example.com`. For multiple manager nodes you can commas separate them like so: `1.2.3.4,5.6.7.8,myserver.example.com`
 
 ### ssh_remote_port
-This is the port of your SSH server. This is most likely going to be `22` but could be different depending on your setup. Make sure this port is accessible from GitHub Actions. You may have to allow this port through your router, firewall, or security policy with your hosting provider.
+This is the port of your SSH servers. This is most likely going to be `22` but could be different depending on your setup. Make sure this port is accessible from GitHub Actions. You may have to allow this port through your router, firewall, or security policy with your hosting provider. Currently, the port must be the same on all servers if you are using a Docker Swarm cluster.
 
 ### ssh_deploy_private_key
-This is the private key you use to authenticate to your server via SSH. It must be in a valid private key format. 
+This is the private key you use to authenticate to your servers via SSH. It must be in a valid private key format. 
 
 To generate a keypair, you can use the following commands:
 
@@ -108,21 +108,21 @@ cat ~/Desktop/id_ed25519_deploy.pub | pbcopy # Copy your public key to your clip
 ```
 
 > [!CAUTION]
-> In order for you to connect to your server, the user you're connecting as must have your public key in their **authorized_keys** file.
+> In order for you to connect to your servers, the user you're connecting as must have your public key in their **authorized_keys** file.
 
-Copy the output and add it to the `~/.ssh/authorized_keys` file on your server for the user you're connecting as.
+Copy the output and add it to the `~/.ssh/authorized_keys` file on your servers for the user you're connecting as.
 
 ### ssh_remote_known_hosts
-This is the public key of your SSH server to validate we are connecting to the right server. It must be in a [valid known_hosts format](https://www.ibm.com/docs/en/zos/3.1.0?topic=daemon-ssh-known-hosts-file-format).
+This is the public key of your SSH servers to validate we are connecting to the right server. It must be in a [valid known_hosts format](https://www.ibm.com/docs/en/zos/3.1.0?topic=daemon-ssh-known-hosts-file-format).
 
 ### Removing the "ssh_remote_known_hosts" warning
 ![image](.github/img/known-hosts-warning.png)
-For simplicity sake, we will automatically scan the known public SSH keys of your server and attempt to make a connection. The problem with this is it opens you up to a man-in-the-middle attack.
+For simplicity sake, we will automatically scan the known public SSH keys of your servers and attempt to make a connection. The problem with this is it opens you up to a man-in-the-middle attack.
 
-To ensure you're validating the identity of your server, you can set the `ssh_remote_known_hosts` input with the public key of your server. You can set this value to a GitHub secret like `SSH_REMOTE_KNOWN_HOSTS`:
+To ensure you're validating the identity of your servers, you can set the `ssh_remote_known_hosts` input with the public key of your servers. You can set this value to a GitHub secret like `SSH_REMOTE_KNOWN_HOSTS`:
 
 ```yml
-- uses: serversideup/github-action-docker-swarm-deploy@v3
+- uses: harrisonratcliffe/github-action-docker-swarm-deploy@v1.0.0
   with:
     registry-token: "${{ secrets.GITHUB_TOKEN }}"
     registry-username: "${{ github.actor }}"
@@ -137,7 +137,7 @@ To ensure you're validating the identity of your server, you can set the `ssh_re
 #### Setting the "ssh_remote_known_hosts" secret
 ![image](.github/img/secrets.png)
 
-You can set the `ssh_remote_known_hosts` secret by getting the public key of your server and setting it as a GitHub secret. You can run this from your **local machine** (not in GitHub Actions) to get the public key of your server:
+You can set the `ssh_remote_known_hosts` secret by getting the public key of your servers and setting it as a GitHub secret. You can run this from your **local machine** (not in GitHub Actions) to get the public key of your servers:
 
 > [!NOTE]  
 > Replace `myserver.example.com` with the hostname of your server. You can also change the port by changing `-p 22` to your desired port.
@@ -159,7 +159,7 @@ Copy the output and set it as a GitHub secret (usually called `SSH_REMOTE_KNOWN_
 ![image](.github/img/secrets.png)
 
 #### Validate the known hosts file
-If you need to validate the known hosts file, you can save it in a file on your local machine and attempt to SSH into your server with it:
+If you need to validate the known hosts file, you can save it in a file on your local machine and attempt to SSH into your servers with it:
 
 ```bash
 ssh -p 22 -i /path/to/test_known_hosts_file myserver.example.com
@@ -175,7 +175,7 @@ We include an optional input to get the MD5 checksum of a file. This is useful i
 
 ```yml
 steps:
-  - uses: serversideup/github-action-docker-swarm-deploy@v3
+  - uses: harrisonratcliffe/github-action-docker-swarm-deploy@v1.0.0
     with:
       md5_file_path: "./path/to/my/file.txt"
       md5_variable_name: "MY_FILE_MD5"
@@ -188,7 +188,7 @@ You can use an .env file to set environment variables for your container. This i
 
 ```yml
 steps:
-  - uses: serversideup/github-action-docker-swarm-deploy@v3
+  - uses: harrisonratcliffe/github-action-docker-swarm-deploy@v1.0.0
     with:
       env_file_base64: "${{ secrets.ENV_FILE_BASE64 }}"
 ```
