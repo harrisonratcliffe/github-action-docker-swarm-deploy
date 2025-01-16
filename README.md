@@ -78,7 +78,7 @@ SSH can have a few moving parts and it's important you get this right. Here's a 
 ### ssh_deploy_user
 This is the user you want to connect to your servers with. This is most likely going to be `deploy` but could be different depending on your setup. It is very important that whatever user you choose, this user should have permissions to run `docker stack deploy` (without `sudo`).
 
-### ssh_remote_hostname
+### ssh_remote_hostnames
 This is the hostnames or IP addresses of your servers. This is most likely going to be your server's public IP address. This can be `1.2.3.4` or `myserver.example.com`. For multiple manager nodes you can commas separate them like so: `1.2.3.4,5.6.7.8,myserver.example.com`
 
 ### ssh_remote_port
@@ -127,7 +127,7 @@ To ensure you're validating the identity of your servers, you can set the `ssh_r
     registry-token: "${{ secrets.GITHUB_TOKEN }}"
     registry-username: "${{ github.actor }}"
     ssh_deploy_private_key: "${{ secrets.SSH_DEPLOY_PRIVATE_KEY }}"
-    ssh_remote_hostname: "${{ secrets.SSH_REMOTE_HOSTNAME }}"
+    ssh_remote_hostnames: "${{ secrets.SSH_REMOTE_HOSTNAME }}"
     ssh_remote_known_hosts: "${{ secrets.SSH_REMOTE_KNOWN_HOSTS }}" # Set "SSH_REMOTE_KNOWN_HOSTS" in GitHub Actions Secrets 
     stack_name: "${{ env.PROJECT_NAME }}"
   env:
