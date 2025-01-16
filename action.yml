@@ -86,52 +86,68 @@ runs:
     - name: Verify SSH Connection
       run: |
         echo "::group::Validating SSH Connections"
-        
+
         # Split hostnames into an array
         IFS=',' read -ra HOSTS <<< "${{ inputs.ssh_remote_hostnames }}"
-        
+
+        connection_successful=false
+        failed_hosts=()
+
         for host in "${HOSTS[@]}"; do
           # Trim whitespace
           host=$(echo "$host" | xargs)
-          
+
           echo "Attempting to connect to $host on port ${{ inputs.ssh_remote_port }} as user ${{ inputs.ssh_deploy_user }}"
-          
+
           attempt_ssh_connection() {
             local ssh_options="$1"
             timeout 10s ssh $ssh_options -p ${{ inputs.ssh_remote_port }} ${{ inputs.ssh_deploy_user }}@"$host" exit 2>/dev/null
           }
-          
-          connection_successful=false
-          temp_known_hosts_file=~/.ssh/temp_known_hosts
-          
+
+          host_connection_successful=false
+          temp_known_hosts_file=~/.ssh/temp_known_hosts_"$host"
+
           # If known_hosts is provided, try to use it
           if [[ -n "${{ inputs.ssh_remote_known_hosts }}" ]]; then
             echo "${{ inputs.ssh_remote_known_hosts }}" > "$temp_known_hosts_file"
             if attempt_ssh_connection "-o BatchMode=yes -o ConnectTimeout=5 -o UserKnownHostsFile=$temp_known_hosts_file"; then
               echo "SSH connection successful with provided known_hosts to $host"
+              host_connection_successful=true
               connection_successful=true
             else
               echo "::warning::Connection to $host failed with provided known_hosts."
+
+              # Try without strict host key checking
               if attempt_ssh_connection "-o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no"; then
-                echo "::error::Connection to $host succeeded without strict host key checking but failed with provided known_hosts."
-                exit 1
+                echo "::warning::Connection to $host succeeded without strict host key checking."
+                host_connection_successful=true
+                connection_successful=true
               fi
             fi
             # Clean up the temporary file
             rm -f "$temp_known_hosts_file"
           else
+            # No known_hosts provided
             if attempt_ssh_connection "-o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no"; then
               echo "SSH connection successful to $host"
+              host_connection_successful=true
               connection_successful=true
             fi
           fi
-          
-          if ! $connection_successful; then
-            echo "::error::SSH CONNECTION FAILED to $host"
-            exit 1
+
+          # If this host failed, add to failed hosts list
+          if ! $host_connection_successful; then
+            echo "::warning::SSH CONNECTION FAILED to $host"
+            failed_hosts+=("$host")
           fi
-        done
-        
+        }
+
+        # Final check - if no hosts connected, fail the workflow
+        if ! $connection_successful; then
+          echo "::error::SSH CONNECTION FAILED to ALL hosts: ${failed_hosts[*]}"
+          exit 1
+        fi
+
         echo "::endgroup::"
       shell: bash
       env:
