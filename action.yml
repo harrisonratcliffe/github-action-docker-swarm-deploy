@@ -113,13 +113,13 @@ runs:
           # Try connection with filtered known hosts
           if attempt_ssh_connection "$host" "-o BatchMode=yes -o ConnectTimeout=5 -o UserKnownHostsFile=$temp_known_hosts_file -o StrictHostKeyChecking=yes"; then
             echo "SSH connection successful with provided known_hosts to $host"
-            echo "deployment_host=$host" >> $GITHUB_OUTPUT
+            deployment_host="$host"
             break
           else
             # Fallback to no strict host checking
             if attempt_ssh_connection "$host" "-o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no"; then
               echo "::warning::Connection to $host succeeded without strict host key checking."
-              echo "deployment_host=$host" >> $GITHUB_OUTPUT
+              deployment_host="$host"
               break
             else
               echo "::warning::SSH CONNECTION FAILED to $host"
@@ -131,10 +131,13 @@ runs:
         done
 
         # Check if a deployment host was found
-        if [ -z "${{ steps.ssh-check.outputs.deployment_host }}" ]; then
+        if [ -z "$deployment_host" ]; then
           echo "::error::SSH CONNECTION FAILED to ALL hosts"
           exit 1
         fi
+
+        # Use printf to ensure proper output handling
+        printf "deployment_host=%s" "$deployment_host" >> $GITHUB_OUTPUT
 
         echo "::endgroup::"
       shell: bash
@@ -274,10 +277,16 @@ runs:
 
     - name: Run Docker Stack deployment via SSH
       run: |
-        deployment_host="${{ steps.ssh-check.outputs.deployment_host }}"
-        
+        # Retrieve the deployment host directly from the output
+        deployment_host=$(grep -oP '(?<=deployment_host=).*' "$GITHUB_OUTPUT")
+
+        if [ -z "$deployment_host" ]; then
+          echo "::error::No deployment host found"
+          exit 1
+        fi
+
         echo "Deploying to host: $deployment_host"
-        
+
         docker --log-level ${{ env.ACTIONS_STEP_DEBUG == 'true' && 'debug' || inputs.log_level }} -H ssh://${{ inputs.ssh_deploy_user }}@"$deployment_host":${{ inputs.ssh_remote_port }} \
           stack deploy --detach=false --with-registry-auth \
           ${{ inputs.docker_compose_file_path }} \
