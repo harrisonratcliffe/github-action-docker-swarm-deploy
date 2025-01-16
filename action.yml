@@ -84,14 +84,14 @@ runs:
       shell: bash
 
     - name: Verify SSH Connection
+      id: ssh-check
       run: |
         echo "::group::Validating SSH Connections"
 
         # Split hostnames into an array
         IFS=',' read -ra HOSTS <<< "${{ inputs.ssh_remote_hostnames }}"
 
-        connection_successful=false
-        failed_hosts=()
+        deployment_host=""
 
         attempt_ssh_connection() {
           local host="$1"
@@ -105,30 +105,24 @@ runs:
 
           echo "Attempting to connect to $host on port ${{ inputs.ssh_remote_port }} as user ${{ inputs.ssh_deploy_user }}"
 
-          host_connection_successful=false
           temp_known_hosts_file=$(mktemp)
 
           # Filter known hosts for this specific host
           grep "^$host " <<< "${{ inputs.ssh_remote_known_hosts }}" > "$temp_known_hosts_file"
 
-          # Debug: Show the filtered known hosts
-          echo "Known hosts for $host:"
-          cat "$temp_known_hosts_file"
-
           # Try connection with filtered known hosts
           if attempt_ssh_connection "$host" "-o BatchMode=yes -o ConnectTimeout=5 -o UserKnownHostsFile=$temp_known_hosts_file -o StrictHostKeyChecking=yes"; then
             echo "SSH connection successful with provided known_hosts to $host"
-            host_connection_successful=true
-            connection_successful=true
+            echo "deployment_host=$host" >> $GITHUB_OUTPUT
+            break
           else
             # Fallback to no strict host checking
             if attempt_ssh_connection "$host" "-o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no"; then
               echo "::warning::Connection to $host succeeded without strict host key checking."
-              host_connection_successful=true
-              connection_successful=true
+              echo "deployment_host=$host" >> $GITHUB_OUTPUT
+              break
             else
               echo "::warning::SSH CONNECTION FAILED to $host"
-              failed_hosts+=("$host")
             fi
           fi
 
@@ -136,9 +130,9 @@ runs:
           rm -f "$temp_known_hosts_file"
         done
 
-        # Final check - if no hosts connected, fail the workflow
-        if [ "$connection_successful" = false ]; then
-          echo "::error::SSH CONNECTION FAILED to ALL hosts: ${failed_hosts[*]}"
+        # Check if a deployment host was found
+        if [ -z "${{ steps.ssh-check.outputs.deployment_host }}" ]; then
+          echo "::error::SSH CONNECTION FAILED to ALL hosts"
           exit 1
         fi
 
@@ -280,21 +274,15 @@ runs:
 
     - name: Run Docker Stack deployment via SSH
       run: |
-        # Split hostnames into an array
-        IFS=',' read -ra HOSTS <<< "${{ inputs.ssh_remote_hostnames }}"
+        deployment_host="${{ steps.ssh-check.outputs.deployment_host }}"
         
-        for host in "${HOSTS[@]}"; do
-          # Trim whitespace
-          host=$(echo "$host" | xargs)
-          
-          echo "Deploying to host: $host"
-          
-          docker --log-level ${{ env.ACTIONS_STEP_DEBUG == 'true' && 'debug' || inputs.log_level }} -H ssh://${{ inputs.ssh_deploy_user }}@"$host":${{ inputs.ssh_remote_port }} \
-            stack deploy --detach=false --with-registry-auth \
-            ${{ inputs.docker_compose_file_path }} \
-            ${{ inputs.stack_name }} \
-            --prune
-        done
+        echo "Deploying to host: $deployment_host"
+        
+        docker --log-level ${{ env.ACTIONS_STEP_DEBUG == 'true' && 'debug' || inputs.log_level }} -H ssh://${{ inputs.ssh_deploy_user }}@"$deployment_host":${{ inputs.ssh_remote_port }} \
+          stack deploy --detach=false --with-registry-auth \
+          ${{ inputs.docker_compose_file_path }} \
+          ${{ inputs.stack_name }} \
+          --prune
       shell: bash
       env:
         SSH_AUTH_SOCK: /tmp/ssh_agent.sock
