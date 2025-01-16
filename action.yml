@@ -87,6 +87,7 @@ runs:
       id: ssh-check
       run: |
         echo "::group::Validating SSH Connections"
+        set -x  # Enable verbose output
 
         # Split hostnames into an array
         IFS=',' read -ra HOSTS <<< "${{ inputs.ssh_remote_hostnames }}"
@@ -96,7 +97,9 @@ runs:
         attempt_ssh_connection() {
           local host="$1"
           local ssh_options="$2"
-          timeout 10s ssh $ssh_options -p ${{ inputs.ssh_remote_port }} ${{ inputs.ssh_deploy_user }}@"$host" exit 2>/dev/null
+          echo "Attempting connection with options: $ssh_options"
+          ssh $ssh_options -p ${{ inputs.ssh_remote_port }} ${{ inputs.ssh_deploy_user }}@"$host" exit
+          return $?
         }
 
         for host in "${HOSTS[@]}"; do
@@ -107,17 +110,22 @@ runs:
 
           temp_known_hosts_file=$(mktemp)
 
+          # Debug: Show known hosts content
+          echo "Known hosts content for $host:"
+          grep "^$host " <<< "${{ inputs.ssh_remote_known_hosts }}"
+
           # Filter known hosts for this specific host
           grep "^$host " <<< "${{ inputs.ssh_remote_known_hosts }}" > "$temp_known_hosts_file"
 
           # Try connection with filtered known hosts
-          if attempt_ssh_connection "$host" "-o BatchMode=yes -o ConnectTimeout=5 -o UserKnownHostsFile=$temp_known_hosts_file -o StrictHostKeyChecking=yes"; then
+          if attempt_ssh_connection "$host" "-v -o BatchMode=yes -o ConnectTimeout=5 -o UserKnownHostsFile=$temp_known_hosts_file -o StrictHostKeyChecking=yes"; then
             echo "SSH connection successful with provided known_hosts to $host"
             deployment_host="$host"
             break
           else
+            echo "Connection with known hosts failed. Trying without strict checking."
             # Fallback to no strict host checking
-            if attempt_ssh_connection "$host" "-o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no"; then
+            if attempt_ssh_connection "$host" "-v -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no"; then
               echo "::warning::Connection to $host succeeded without strict host key checking."
               deployment_host="$host"
               break
@@ -136,8 +144,9 @@ runs:
           exit 1
         fi
 
-        # Use printf to ensure proper output handling
-        printf "deployment_host=%s" "$deployment_host" >> $GITHUB_OUTPUT
+        # Write output
+        echo "deployment_host=$deployment_host"
+        echo "deployment_host=$deployment_host" >> $GITHUB_OUTPUT
 
         echo "::endgroup::"
       shell: bash
@@ -277,7 +286,11 @@ runs:
 
     - name: Run Docker Stack deployment via SSH
       run: |
-        # Retrieve the deployment host directly from the output
+        # Debug output
+        echo "SSH Check Step Output:"
+        cat $GITHUB_OUTPUT
+
+        # Retrieve the deployment host
         deployment_host=$(grep -oP '(?<=deployment_host=).*' "$GITHUB_OUTPUT")
 
         if [ -z "$deployment_host" ]; then
