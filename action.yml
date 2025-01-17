@@ -86,48 +86,49 @@ runs:
     - name: Verify SSH Connection
       run: |
         echo "::group::Validating SSH Connection"
-        echo "Attempting to connect to one of the provided hosts: ${{ inputs.ssh_remote_hostnames }} on port ${{ inputs.ssh_remote_port }} as user ${{ inputs.ssh_deploy_user }}"
-        
+        echo "Attempting to connect to provided hosts: ${{ inputs.ssh_remote_hostnames }} on port ${{ inputs.ssh_remote_port }} as user ${{ inputs.ssh_deploy_user }}"
+
         attempt_ssh_connection() {
           local ssh_options="$1"
           timeout 10s ssh $ssh_options -p ${{ inputs.ssh_remote_port }} ${{ inputs.ssh_deploy_user }}@$2 exit 2>/dev/null
         }
 
         connection_successful=false
-        temp_known_hosts_file=~/.ssh/temp_known_hosts
         chosen_host=""
+        temp_known_hosts_file=~/.ssh/temp_known_hosts
 
         # Split the hosts into an array
         IFS=',' read -ra HOSTS <<< "${{ inputs.ssh_remote_hostnames }}"
 
         for host in "${HOSTS[@]}"; do
           echo "Trying SSH connection to $host"
-          # If known_hosts is provided, try to use it
+
+          # Write known_hosts (if provided) to a temporary file
           if [[ -n "${{ inputs.ssh_remote_known_hosts }}" ]]; then
             echo "${{ inputs.ssh_remote_known_hosts }}" > "$temp_known_hosts_file"
+            chmod 644 "$temp_known_hosts_file"
+          fi
+
+          if [[ -f "$temp_known_hosts_file" ]]; then
+            # Try connecting using the provided known_hosts
             if attempt_ssh_connection "-o BatchMode=yes -o ConnectTimeout=5 -o UserKnownHostsFile=$temp_known_hosts_file" "$host"; then
               echo "SSH connection successful with provided known_hosts to $host"
               connection_successful=true
               chosen_host="$host"
               break
             else
-              echo "::warning::Failed to connect to $host with provided known_hosts. Trying without strict host key checking..."
-              if attempt_ssh_connection "-o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no" "$host"; then
-                echo "::error::Connection succeeded without strict host key checking but failed with provided known_hosts.%0A%0A\
-                Your known_hosts file is incorrect. Please test and validate your known_hosts file.%0A%0A\
-                For more information see the serversideup/github-action-docker-swarm-deploy README."
-                exit 1
-              fi
+              echo "::warning::Failed to connect to $host with provided known_hosts. Retrying without strict host key checking..."
             fi
-            # Clean up the temporary file
-            rm -f "$temp_known_hosts_file"
+          fi
+
+          # Fallback: Try connecting without strict host key checking
+          if attempt_ssh_connection "-o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no" "$host"; then
+            echo "::warning::SSH connection successful to $host without strict host key checking. Please validate your known_hosts file for better security."
+            connection_successful=true
+            chosen_host="$host"
+            break
           else
-            if attempt_ssh_connection "-o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no" "$host"; then
-              echo "SSH connection successful to $host"
-              connection_successful=true
-              chosen_host="$host"
-              break
-            fi
+            echo "::error::Failed to connect to $host."
           fi
         done
 
@@ -139,24 +140,13 @@ runs:
         fi
 
         echo "::error::SSH CONNECTION FAILED%0A%0A\
-        Please double check the following (some values are masked for security reasons):%0A\
+        Please verify the following:%0A\
         1. ssh_remote_hostnames: ${{ inputs.ssh_remote_hostnames }}%0A\
         2. ssh_remote_port: ${{ inputs.ssh_remote_port }}%0A\
         3. ssh_deploy_user: ${{ inputs.ssh_deploy_user }}%0A\
-        4. ssh_deploy_private_key: Verify it's set correctly in GitHub Secrets%0A\
-        5. The ${{ inputs.ssh_deploy_user }} user on your server must have your public key added to the authorized_keys file%0A\  
-        6. Firewall settings: Ensure the specified port is allowed%0A\
-        7. Server SSH configuration: Verify it allows connections from GitHub Actions IP range%0A\
-        8. If provided, verify ssh_remote_known_hosts is correct and up-to-date%0A%0A\
-        For more information see the serversideup/github-action-docker-swarm-deploy README."
-        
-        if [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
-          echo "::group::Detailed SSH Debug Output"
-          ssh -vvv -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
-            -p ${{ inputs.ssh_remote_port }} ${{ inputs.ssh_deploy_user }}@${{ inputs.ssh_remote_hostnames }} exit
-          echo "::endgroup::"
-        fi
-        
+        4. ssh_deploy_private_key: Confirm it's correctly set in GitHub Secrets%0A\
+        5. known_hosts: Make sure the provided file is correct and up-to-date.%0A%0A\
+        For more information, see the serversideup/github-action-docker-swarm-deploy README."
         echo "::endgroup::"
         exit 1
       shell: bash
