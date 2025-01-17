@@ -1,4 +1,4 @@
-name: 'docker-swarm-deploy-github-action'
+name: 'github-action-docker-swarm-deploy'
 description: 'Deploy your Docker Swarm apps in seconds. 🚀'
 inputs:
   docker_compose_file_path:
