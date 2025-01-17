@@ -1,4 +1,4 @@
-name: 'github-action-docker-swarm-deploy'
+name: 'docker-swarm-deploy-github-action'
 description: 'Deploy your Docker Swarm apps in seconds. 🚀'
 inputs:
   docker_compose_file_path:
@@ -17,21 +17,21 @@ inputs:
     description: 'The name of your Docker stack.'
     required: true
   ssh_deploy_private_key:
-    description: 'The private key you have authenticated to connect to your servers via SSH.'
+    description: 'The private key you have authenticated to connect to your server via SSH.'
     required: true
   ssh_remote_known_hosts:
-    description: 'The public key of your SSH servers to validate we are connecting to the right servers.'
+    description: 'The public key of your SSH server to validate we are connecting to the right server.'
     default: ''
     required: false
   ssh_deploy_user:
-    description: 'The user that you would like to connect as on the remote servers via SSH.'
+    description: 'The user that you would like to connect as on the remote server via SSH.'
     default: 'deploy'
     required: true
   ssh_remote_hostnames:
-    description: 'The hostnames or IP addresses of the servers you want to connect to.'
+    description: 'The hostname(s) or IP address(es) of the server(s) you want to connect to. Accepts a single host or multiple comma-separated hosts.'
     required: true
   ssh_remote_port:
-    description: 'The SSH port of the remote servers you would like to connect to.'
+    description: 'The SSH port of the remote server you would like to connect to.'
     default: '22'
     required: false
   registry:
@@ -84,65 +84,81 @@ runs:
       shell: bash
 
     - name: Verify SSH Connection
-      id: ssh-check
       run: |
-        echo "::group::Validating SSH Connections"
-        set -x  # Enable verbose output
-
-        # Split hostnames into an array
-        IFS=',' read -ra HOSTS <<< "${{ inputs.ssh_remote_hostnames }}"
-
-        deployment_host=""
-
+        echo "::group::Validating SSH Connection"
+        echo "Attempting to connect to one of the provided hosts: ${{ inputs.ssh_remote_hostnames }} on port ${{ inputs.ssh_remote_port }} as user ${{ inputs.ssh_deploy_user }}"
+        
         attempt_ssh_connection() {
-          local host="$1"
-          local ssh_options="$2"
-          ssh $ssh_options -p ${{ inputs.ssh_remote_port }} ${{ inputs.ssh_deploy_user }}@"$host" exit
-          return $?
+          local ssh_options="$1"
+          timeout 10s ssh $ssh_options -p ${{ inputs.ssh_remote_port }} ${{ inputs.ssh_deploy_user }}@$2 exit 2>/dev/null
         }
 
+        connection_successful=false
+        temp_known_hosts_file=~/.ssh/temp_known_hosts
+        chosen_host=""
+
+        # Split the hosts into an array
+        IFS=',' read -ra HOSTS <<< "${{ inputs.ssh_remote_hostnames }}"
+
         for host in "${HOSTS[@]}"; do
-          # Trim whitespace
-          host=$(echo "$host" | xargs)
-
-          echo "Attempting to connect to $host on port ${{ inputs.ssh_remote_port }} as user ${{ inputs.ssh_deploy_user }}"
-
-          temp_known_hosts_file=$(mktemp)
-
-          # Filter known hosts for this specific host
-          grep "^$host " <<< "${{ inputs.ssh_remote_known_hosts }}" > "$temp_known_hosts_file"
-
-          # Try connection with filtered known hosts
-          if attempt_ssh_connection "$host" "-o BatchMode=yes -o ConnectTimeout=5 -o UserKnownHostsFile=$temp_known_hosts_file -o StrictHostKeyChecking=yes"; then
-            echo "SSH connection successful with provided known_hosts to $host"
-            deployment_host="$host"
-            break
-          else
-            # Fallback to no strict host checking
-            if attempt_ssh_connection "$host" "-o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no"; then
-              echo "::warning::Connection to $host succeeded without strict host key checking."
-              deployment_host="$host"
+          echo "Trying SSH connection to $host"
+          # If known_hosts is provided, try to use it
+          if [[ -n "${{ inputs.ssh_remote_known_hosts }}" ]]; then
+            echo "${{ inputs.ssh_remote_known_hosts }}" > "$temp_known_hosts_file"
+            if attempt_ssh_connection "-o BatchMode=yes -o ConnectTimeout=5 -o UserKnownHostsFile=$temp_known_hosts_file" "$host"; then
+              echo "SSH connection successful with provided known_hosts to $host"
+              connection_successful=true
+              chosen_host="$host"
               break
             else
-              echo "::warning::SSH CONNECTION FAILED to $host"
+              echo "::warning::Failed to connect to $host with provided known_hosts. Trying without strict host key checking..."
+              if attempt_ssh_connection "-o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no" "$host"; then
+                echo "::error::Connection succeeded without strict host key checking but failed with provided known_hosts.%0A%0A\
+                Your known_hosts file is incorrect. Please test and validate your known_hosts file.%0A%0A\
+                For more information see the serversideup/github-action-docker-swarm-deploy README."
+                exit 1
+              fi
+            fi
+            # Clean up the temporary file
+            rm -f "$temp_known_hosts_file"
+          else
+            if attempt_ssh_connection "-o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no" "$host"; then
+              echo "SSH connection successful to $host"
+              connection_successful=true
+              chosen_host="$host"
+              break
             fi
           fi
-
-          # Clean up temporary known hosts file
-          rm -f "$temp_known_hosts_file"
         done
 
-        # Check if a deployment host was found
-        if [ -z "$deployment_host" ]; then
-          echo "::error::SSH CONNECTION FAILED to ALL hosts"
-          exit 1
+        if $connection_successful; then
+          echo "Successfully connected to $chosen_host"
+          echo "CHOSEN_HOST=$chosen_host" >> $GITHUB_ENV
+          echo "::endgroup::"
+          exit 0
         fi
 
-        # Write output in multiple ways
-        echo "deployment_host=$deployment_host" >> "$GITHUB_OUTPUT"
-        echo "Deployment host: $deployment_host"
-
+        echo "::error::SSH CONNECTION FAILED%0A%0A\
+        Please double check the following (some values are masked for security reasons):%0A\
+        1. ssh_remote_hostnames: ${{ inputs.ssh_remote_hostnames }}%0A\
+        2. ssh_remote_port: ${{ inputs.ssh_remote_port }}%0A\
+        3. ssh_deploy_user: ${{ inputs.ssh_deploy_user }}%0A\
+        4. ssh_deploy_private_key: Verify it's set correctly in GitHub Secrets%0A\
+        5. The ${{ inputs.ssh_deploy_user }} user on your server must have your public key added to the authorized_keys file%0A\  
+        6. Firewall settings: Ensure the specified port is allowed%0A\
+        7. Server SSH configuration: Verify it allows connections from GitHub Actions IP range%0A\
+        8. If provided, verify ssh_remote_known_hosts is correct and up-to-date%0A%0A\
+        For more information see the serversideup/github-action-docker-swarm-deploy README."
+        
+        if [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
+          echo "::group::Detailed SSH Debug Output"
+          ssh -vvv -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+            -p ${{ inputs.ssh_remote_port }} ${{ inputs.ssh_deploy_user }}@${{ inputs.ssh_remote_hostnames }} exit
+          echo "::endgroup::"
+        fi
+        
         echo "::endgroup::"
+        exit 1
       shell: bash
       env:
         SSH_AUTH_SOCK: /tmp/ssh_agent.sock
@@ -158,12 +174,12 @@ runs:
         fi
       shell: bash
 
-    - name: If no known_hosts file is provided, use ssh-keyscan to get the public key of the remote servers.
+    - name: If no known_hosts file is provided, use ssh-keyscan to get the public key of the chosen server.
       if: ${{ inputs.ssh_remote_known_hosts == '' }}
       run: |
         echo "::warning::Consider setting \"SSH_REMOTE_KNOWN_HOSTS\" as a GitHub Actions secret for improved security.%0A%0A\
-        For more information see the harrisonratcliffe/github-action-docker-swarm-deploy README."
-        ssh-keyscan -p ${{ inputs.ssh_remote_port }} -H ${{ inputs.ssh_remote_hostnames }} >> ~/.ssh/known_hosts
+        For more information see the serversideup/github-action-docker-swarm-deploy README."
+        ssh-keyscan -p ${{ inputs.ssh_remote_port }} -H ${{ env.CHOSEN_HOST }} >> ~/.ssh/known_hosts
         chmod 644 ~/.ssh/known_hosts
         if [ ! -s ~/.ssh/known_hosts ]; then
           echo "::error::The known_hosts file is empty. This may indicate an issue with the SSH keyscan process."
@@ -182,116 +198,9 @@ runs:
         password: ${{ inputs.registry-token }}
         registry: ${{ inputs.registry }}
 
-    - name: Load .env file and set variables
-      if: "${{ inputs.env_file_base64 != '' }}"
+    - name: Run Docker Stack deployment via SSH.
       run: |
-        # Decode the base64 encoded .env file and save it
-        echo "${{ inputs.env_file_base64 }}" | base64 -d > .env
-        # Set appropriate permissions for the .env file
-        chmod 600 .env
-
-        # Debug: Output the contents of the .env file if debug mode is enabled
-        if [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
-          echo "::debug::Contents of .env file:"
-          cat .env | sed 's/^/::debug::  /'
-        fi
-        
-        # First pass: Set all variables without interpolation
-        # This ensures all variables are available for the second pass
-        while IFS= read -r line || [[ -n "$line" ]]; do
-          # Remove leading and trailing whitespace
-          line=$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-          
-          # Skip empty lines and comments
-          if [[ -z "$line" || "$line" == \#* ]]; then
-            continue
-          fi
-          
-          # Parse key-value pairs
-          if [[ $line =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
-            key="${BASH_REMATCH[1]}"
-            value="${BASH_REMATCH[2]}"
-            
-            # Remove surrounding quotes if present
-            value=$(echo "$value" | sed -e 's/^"//' -e 's/"$//')
-            
-            # Export the variable to make it available for the second pass
-            export "$key=$value"
-          fi
-        done < .env
-        
-        # Second pass: Handle interpolation and set GitHub environment
-        while IFS= read -r line || [[ -n "$line" ]]; do
-          # Remove leading and trailing whitespace
-          line=$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-          
-          # Skip empty lines and comments
-          if [[ -z "$line" || "$line" == \#* ]]; then
-            continue
-          fi
-          
-          # Parse key-value pairs
-          if [[ $line =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
-            key="${BASH_REMATCH[1]}"
-            value="${BASH_REMATCH[2]}"
-            
-            # Remove surrounding quotes if present
-            value=$(echo "$value" | sed -e 's/^"//' -e 's/"$//')
-            
-            # Handle variable interpolation
-            # This allows for variables to reference other variables
-            if [[ $value == \$\{*\} ]]; then
-              value=$(eval echo "$value")
-            fi
-            
-            # Only process non-empty values
-            if [[ -n "$value" ]]; then
-              # Mask the value to prevent it from being displayed in logs
-              echo "::add-mask::$value"
-              # Set the environment variable for GitHub Actions
-              echo "$key=$value" >> $GITHUB_ENV
-              # Debug: Log which variable is being set
-              [[ "$ACTIONS_STEP_DEBUG" == "true" ]] && echo "::debug::Setting $key"
-            fi
-            
-            # Special handling for APP_URL to set SPIN_APP_DOMAIN
-            if [[ "$key" == "APP_URL" && -n "$value" && -z "$SPIN_APP_DOMAIN" ]]; then
-              # Extract domain from APP_URL
-              SPIN_APP_DOMAIN=$(echo "$value" | sed -E 's#^https?://##')
-              # Set SPIN_APP_DOMAIN as a GitHub environment variable
-              echo "SPIN_APP_DOMAIN=$SPIN_APP_DOMAIN" >> $GITHUB_ENV
-              # Mask SPIN_APP_DOMAIN value
-              echo "::add-mask::$SPIN_APP_DOMAIN"
-              # Debug: Log that SPIN_APP_DOMAIN is being set
-              [[ "$ACTIONS_STEP_DEBUG" == "true" ]] && echo "::debug::Setting SPIN_APP_DOMAIN"
-            fi
-          elif [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
-            # Debug: Log lines that don't match the expected format
-            echo "::debug::Skipping line: $line"
-          fi
-        done < .env
-        
-        # Debug: Output all set environment variables if debug mode is enabled
-        if [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
-          echo "::debug::Environment variables set:"
-          env | sort | sed 's/^/::debug::  /'
-        fi
-      shell: bash
-
-    - name: Run Docker Stack deployment via SSH
-      run: |
-        # Explicitly read the deployment host from the output file
-        deployment_host=$(grep "deployment_host=" "$GITHUB_OUTPUT" | cut -d'=' -f2)
-
-        if [ -z "$deployment_host" ]; then
-          echo "::error::No deployment host found"
-          cat "$GITHUB_OUTPUT"  # Debug: show full output file contents
-          exit 1
-        fi
-
-        echo "Deploying to host: $deployment_host"
-
-        docker --log-level ${{ env.ACTIONS_STEP_DEBUG == 'true' && 'debug' || inputs.log_level }} -H ssh://${{ inputs.ssh_deploy_user }}@"$deployment_host":${{ inputs.ssh_remote_port }} \
+        docker --log-level ${{ env.ACTIONS_STEP_DEBUG == 'true' && 'debug' || inputs.log_level }} -H ssh://${{ inputs.ssh_deploy_user }}@${{ env.CHOSEN_HOST }}:${{ inputs.ssh_remote_port }} \
           stack deploy --detach=false --with-registry-auth \
           ${{ inputs.docker_compose_file_path }} \
           ${{ inputs.stack_name }} \
@@ -302,4 +211,4 @@ runs:
 
 branding:
   icon: 'zap'
-  color: 'blue'
+  color: ‘blue'
